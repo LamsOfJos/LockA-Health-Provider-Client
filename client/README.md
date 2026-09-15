@@ -30,6 +30,34 @@ npm run test:coverage  # run with a v8 coverage report (text + html + lcov)
 
 Test files live next to the code they cover (`*.test.ts` / `*.test.tsx`). Shared setup (currently just `@testing-library/jest-dom` matchers) lives in `src/test/setup.ts` and is wired in via `vite.config.ts`'s `test.setupFiles`.
 
+### End-to-end tests (Playwright)
+
+Cross-page flows are covered by [Playwright](https://playwright.dev/) in `e2e/`, configured in `playwright.config.ts`.
+
+```bash
+npx playwright install --with-deps chromium  # one-time browser install
+npm run test:e2e                             # run the full E2E suite headless
+npx playwright test --ui                     # interactive UI mode for local debugging
+```
+
+The Playwright config points `webServer` at the Vite dev server (auto-started on a dedicated port for the test run, reused locally if already running) — no separate build/preview step is required.
+
+Since there's no real Freighter browser extension available in CI or headless runs, `e2e/fixtures/freighter.ts` exports `mockFreighter(page, options)`, which stubs the extension's `window.postMessage` bridge (the same `FREIGHTER_EXTERNAL_MSG_REQUEST`/`RESPONSE` envelope the real extension's content script answers) via `page.addInitScript`. Call it before `page.goto(...)` in any spec:
+
+```ts
+import { test, expect } from '@playwright/test';
+import { mockFreighter } from './fixtures/freighter';
+
+test('connects a mocked wallet', async ({ page }) => {
+  await mockFreighter(page); // installed, not yet approved — "Connect Wallet" performs the approval
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Connect Wallet' }).click();
+  // ...
+});
+```
+
+Pass `{ installed: false }` to simulate no extension present, or `{ preApproved: true }` to start already connected. See `e2e/wallet-gate.spec.ts` and `e2e/provider-happy-path.spec.ts` for working examples.
+
 ## Data layer
 
 `src/lib/api.ts` is a mock implementation of the documented `locka-api` provider endpoints (`GET /providers/{id}`, `POST /access-requests`, `GET /records`, `DELETE /access-grants/{id}`, `GET /audit-log`, etc.), backed by in-memory fixtures in `src/lib/mockData.ts`. Every function's signature mirrors the real endpoint shape, so swapping in real `fetch` calls against a live backend is a drop-in replacement — no component changes needed.
@@ -43,4 +71,5 @@ src/
   lib/          types, mock API client, mock data, formatting helpers
   pages/        Dashboard, PatientSearch, RecordsPage, AccessManagement, AuditLog, ProviderProfile
   test/         shared test setup (jest-dom matchers)
+e2e/            Playwright end-to-end specs + fixtures (Freighter mock)
 ```
