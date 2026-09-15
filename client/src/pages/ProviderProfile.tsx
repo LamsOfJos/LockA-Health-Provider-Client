@@ -72,6 +72,9 @@ export function ProviderProfile() {
       <GlassCard className="p-5">
         <div className="flex items-center justify-between mb-4">
           <div className="section-header !mb-0 !border-0 !pb-0">Staff Accounts</div>
+          <span className="text-xs text-slate-500">
+            {provider.staffCount} member{provider.staffCount === 1 ? '' : 's'}
+          </span>
         </div>
         <div className="space-y-3 mb-5">
           {staff.map((member) => (
