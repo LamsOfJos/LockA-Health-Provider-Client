@@ -171,29 +171,65 @@ describe('records', () => {
     expect(auditAfter).toHaveLength(auditBefore.length);
   });
 
-  it('uploadRecord generates a commitment hash, prepends the record, and logs an audit event', async () => {
-    const before = await flush(api.listRecords());
+  // jsdom's File/Blob.arrayBuffer() relies on a real timer captured before fake
+  // timers are installed, so it never resolves under vi.useFakeTimers() — these
+  // two tests opt back into real timers instead of the flush() helper.
+  it('uploadRecord derives a deterministic commitment hash from the file, prepends the record, and logs an audit event', async () => {
+    vi.useRealTimers();
+    const before = await api.listRecords();
 
-    const uploaded = await flush(
-      api.uploadRecord({
-        patientPassportId: 'pp_test',
-        patientDisplayName: 'Test Patient',
-        category: 'diagnosis',
-        title: 'Test Diagnosis',
-        notes: 'Some notes',
-      }),
-    );
-    expect(uploaded.commitmentHash).toMatch(/^0x[0-9a-f]+$/);
+    const file = new File(['test file content'], 'report.pdf', { type: 'application/pdf' });
+    const uploaded = await api.uploadRecord({
+      patientPassportId: 'pp_test',
+      patientDisplayName: 'Test Patient',
+      category: 'diagnosis',
+      title: 'Test Diagnosis',
+      notes: 'Some notes',
+      file,
+    });
+    expect(uploaded.commitmentHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(uploaded.attachment).toEqual({ fileName: 'report.pdf', fileType: 'application/pdf', fileSize: file.size });
     expect(uploaded.issuerProviderId).toBe('prov_8f2a1c4e9b');
     expect(uploaded.issuerName).toBe('St. Aventine General Hospital');
 
-    const after = await flush(api.listRecords());
+    const after = await api.listRecords();
     expect(after).toHaveLength(before.length + 1);
     expect(after[0].id).toBe(uploaded.id);
 
-    const audit = await flush(api.getAuditLog());
+    const audit = await api.getAuditLog();
     expect(audit[0]).toMatchObject({ type: 'record_uploaded', detail: 'Uploaded Test Diagnosis' });
-  });
+  }, 10000);
+
+  it('uploadRecord derives the same commitment hash for identical file bytes, and a different one for different bytes', async () => {
+    vi.useRealTimers();
+    const uploadedA = await api.uploadRecord({
+      patientPassportId: 'pp_test',
+      patientDisplayName: 'Test Patient',
+      category: 'diagnosis',
+      title: 'Diagnosis A',
+      notes: '',
+      file: new File(['identical bytes'], 'a.pdf', { type: 'application/pdf' }),
+    });
+    const uploadedB = await api.uploadRecord({
+      patientPassportId: 'pp_test',
+      patientDisplayName: 'Test Patient',
+      category: 'diagnosis',
+      title: 'Diagnosis B',
+      notes: '',
+      file: new File(['identical bytes'], 'b.pdf', { type: 'application/pdf' }),
+    });
+    const uploadedC = await api.uploadRecord({
+      patientPassportId: 'pp_test',
+      patientDisplayName: 'Test Patient',
+      category: 'diagnosis',
+      title: 'Diagnosis C',
+      notes: '',
+      file: new File(['different bytes'], 'c.pdf', { type: 'application/pdf' }),
+    });
+
+    expect(uploadedB.commitmentHash).toBe(uploadedA.commitmentHash);
+    expect(uploadedC.commitmentHash).not.toBe(uploadedA.commitmentHash);
+  }, 10000);
 });
 
 describe('access grants', () => {

@@ -143,6 +143,14 @@ export async function viewRecord(id: string): Promise<MedicalRecord | undefined>
   return delay(record);
 }
 
+// Mocks the "backend encrypts records before storage; hash submitted to commitment registry" flow:
+// derive commitmentHash deterministically from the attached file's bytes instead of at random.
+async function hashFileBytes(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return '0x' + Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 // POST /records
 export async function uploadRecord(input: {
   patientPassportId: string;
@@ -150,14 +158,17 @@ export async function uploadRecord(input: {
   category: RecordCategory;
   title: string;
   notes: string;
+  file: File;
 }): Promise<MedicalRecord> {
+  const { file, ...rest } = input;
   const record: MedicalRecord = {
     id: newId('rec'),
     issuerProviderId: provider.providerId,
     issuerName: provider.name,
     createdAt: new Date().toISOString(),
-    commitmentHash: '0x' + Math.random().toString(16).slice(2).padEnd(40, '0'),
-    ...input,
+    commitmentHash: await hashFileBytes(file),
+    attachment: { fileName: file.name, fileType: file.type, fileSize: file.size },
+    ...rest,
   };
   records.unshift(record);
   pushAudit({

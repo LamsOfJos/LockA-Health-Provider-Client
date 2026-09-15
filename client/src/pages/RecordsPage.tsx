@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { GlassCard } from '../components/GlassCard';
 import { Spinner } from '../components/Spinner';
 import { Modal } from '../components/Modal';
-import { RecordsIcon, UploadIcon } from '../components/Icons';
+import { CloseIcon, RecordsIcon, UploadIcon } from '../components/Icons';
 import { listRecords, uploadRecord, viewRecord } from '../lib/api';
 import { useToast } from '../components/Toast';
 import { formatDate } from '../lib/format';
@@ -10,6 +10,16 @@ import { RECORD_CATEGORY_LABELS } from '../lib/types';
 import type { MedicalRecord, RecordCategory } from '../lib/types';
 
 const ALL_CATEGORIES = Object.keys(RECORD_CATEGORY_LABELS) as RecordCategory[];
+
+const ACCEPTED_FILE_TYPES = ['application/pdf', 'image/png', 'image/jpeg'];
+const ACCEPTED_FILE_TYPES_LABEL = 'PDF, PNG, or JPG';
+const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 type Tab = 'all' | 'add';
 
@@ -109,11 +119,34 @@ function AddRecordForm({ onUploaded }: { onUploaded: () => void }) {
   const [category, setCategory] = useState<RecordCategory>('medical_summary');
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = e.target.files?.[0] ?? null;
+    e.target.value = '';
+    if (!selected) return;
+    if (!ACCEPTED_FILE_TYPES.includes(selected.type)) {
+      setFileError(`Unsupported file type. Attach a ${ACCEPTED_FILE_TYPES_LABEL} file.`);
+      return;
+    }
+    if (selected.size > MAX_FILE_SIZE_BYTES) {
+      setFileError(`File is too large. Maximum size is ${formatFileSize(MAX_FILE_SIZE_BYTES)}.`);
+      return;
+    }
+    setFileError(null);
+    setFile(selected);
+  }
+
+  function removeFile() {
+    setFile(null);
+    setFileError(null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!patientPassportId.trim() || !title.trim()) return;
+    if (!patientPassportId.trim() || !title.trim() || !file) return;
     setSubmitting(true);
     await uploadRecord({
       patientPassportId: patientPassportId.trim(),
@@ -121,12 +154,15 @@ function AddRecordForm({ onUploaded }: { onUploaded: () => void }) {
       category,
       title: title.trim(),
       notes: notes.trim(),
+      file,
     });
     setSubmitting(false);
     setPatientPassportId('');
     setPatientDisplayName('');
     setTitle('');
     setNotes('');
+    setFile(null);
+    setFileError(null);
     onUploaded();
   }
 
@@ -166,12 +202,38 @@ function AddRecordForm({ onUploaded }: { onUploaded: () => void }) {
           <input className="input-field" placeholder="e.g. Complete Blood Count Panel" value={title} onChange={(e) => setTitle(e.target.value)} />
         </div>
         <div>
+          <label className="text-xs text-slate-400 mb-1.5 block">Document ({ACCEPTED_FILE_TYPES_LABEL}, max {formatFileSize(MAX_FILE_SIZE_BYTES)})</label>
+          <label className="btn-secondary rounded-lg px-4 py-2 text-sm inline-flex items-center gap-2 cursor-pointer w-fit">
+            <UploadIcon className="w-4 h-4" />
+            Choose File
+            <input
+              type="file"
+              accept={ACCEPTED_FILE_TYPES.join(',')}
+              aria-label="Record document attachment"
+              className="sr-only"
+              onChange={handleFileChange}
+            />
+          </label>
+          {file && (
+            <div className="mt-2 flex items-center justify-between gap-2 text-sm bg-slate-900/40 border border-blue-900/30 rounded-lg px-3 py-2">
+              <span className="truncate text-slate-200">{file.name}</span>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <span className="text-xs text-slate-500">{formatFileSize(file.size)}</span>
+                <button type="button" onClick={removeFile} className="text-slate-400 hover:text-white" aria-label="Remove attachment">
+                  <CloseIcon className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          )}
+          {fileError && <p className="text-xs text-red-400 mt-1.5">{fileError}</p>}
+        </div>
+        <div>
           <label className="text-xs text-slate-400 mb-1.5 block">Notes</label>
           <textarea className="input-field" rows={4} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </div>
         <button
           type="submit"
-          disabled={submitting || !patientPassportId.trim() || !title.trim()}
+          disabled={submitting || !patientPassportId.trim() || !title.trim() || !file}
           className="btn-success rounded-lg px-5 py-2.5 flex items-center gap-2"
         >
           {submitting ? <Spinner size={14} /> : <UploadIcon className="w-4 h-4" />}
@@ -192,6 +254,9 @@ function RecordDetailModal({ record, onClose }: { record: MedicalRecord; onClose
         <Row label="Issued By" value={record.issuerName} />
         <Row label="Created" value={formatDate(record.createdAt)} />
         <Row label="Commitment Hash" value={record.commitmentHash} mono />
+        {record.attachment && (
+          <Row label="Attachment" value={`${record.attachment.fileName} · ${formatFileSize(record.attachment.fileSize)}`} />
+        )}
         <div>
           <div className="text-xs text-slate-500 mb-1">Notes</div>
           <p className="text-slate-300">{record.notes}</p>
