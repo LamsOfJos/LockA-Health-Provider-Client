@@ -10,6 +10,25 @@ vi.mock('../lib/api', () => ({
   createAccessRequest: vi.fn(),
 }));
 
+interface MockScannerProps {
+  onScan: (codes: { rawValue: string }[]) => void;
+  onError: (error: { kind: string; message: string; cause: unknown }) => void;
+}
+
+vi.mock('@yudiel/react-qr-scanner', () => ({
+  Scanner: ({ onScan, onError }: MockScannerProps) => (
+    <div>
+      <button onClick={() => onScan([{ rawValue: 'pp_9c81ff33' }])}>Simulate Successful Scan</button>
+      <button onClick={() => onScan([{ rawValue: '{"passportId":"pp_json55aa","name":"QR Patient"}' }])}>
+        Simulate JSON Payload Scan
+      </button>
+      <button onClick={() => onError({ kind: 'permission-denied', message: 'Permission denied', cause: null })}>
+        Simulate Camera Denied
+      </button>
+    </div>
+  ),
+}));
+
 const mockSearchPatients = vi.mocked(searchPatients);
 const mockCreateAccessRequest = vi.mocked(createAccessRequest);
 
@@ -140,5 +159,51 @@ describe('PatientSearch', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Lab Result' }));
     expect(submitButton).toBeDisabled();
+  });
+
+  describe('QR scanning', () => {
+    it('opens a scanner modal when Scan QR is clicked', async () => {
+      renderPage();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Scan QR' }));
+
+      expect(screen.getByText('Scan Patient QR Code')).toBeInTheDocument();
+      expect(screen.getByText(/Point the camera at a patient's passport QR code/)).toBeInTheDocument();
+    });
+
+    it('populates the search field and triggers a lookup when a QR code is decoded', async () => {
+      mockSearchPatients.mockResolvedValue([activePatient]);
+
+      renderPage();
+      fireEvent.click(screen.getByRole('button', { name: 'Scan QR' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Simulate Successful Scan' }));
+
+      expect(screen.queryByText('Scan Patient QR Code')).not.toBeInTheDocument();
+      await waitFor(() => expect(mockSearchPatients).toHaveBeenCalledWith('pp_9c81ff33'));
+      expect(screen.getByPlaceholderText('Passport ID, name, or contact method…')).toHaveValue('pp_9c81ff33');
+      expect(await screen.findByText('Test Patient')).toBeInTheDocument();
+    });
+
+    it('extracts the passport ID from a JSON QR payload', async () => {
+      mockSearchPatients.mockResolvedValue([]);
+
+      renderPage();
+      fireEvent.click(screen.getByRole('button', { name: 'Scan QR' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Simulate JSON Payload Scan' }));
+
+      await waitFor(() => expect(mockSearchPatients).toHaveBeenCalledWith('pp_json55aa'));
+    });
+
+    it('shows a graceful fallback message when camera access is denied', async () => {
+      renderPage();
+      fireEvent.click(screen.getByRole('button', { name: 'Scan QR' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Simulate Camera Denied' }));
+
+      expect(screen.getByText(/Camera access was denied/)).toBeInTheDocument();
+      expect(mockSearchPatients).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(screen.queryByText('Scan Patient QR Code')).not.toBeInTheDocument();
+    });
   });
 });
